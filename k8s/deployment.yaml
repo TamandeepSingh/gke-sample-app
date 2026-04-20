@@ -69,14 +69,12 @@ spec:
           # -------------------------------------------------------
           # Image
           # -------------------------------------------------------
-          # Format: registry/repository:tag
-          # ghcr.io is GitHub Container Registry — free for public repos.
-          # The CI/CD pipeline replaces this tag with the Git SHA on each push,
-          # ensuring every deployment is traceable to an exact commit.
-          # REPLACE "your-gcp-project-id" with your actual GCP project ID.
-          # Format: gcr.io/<project-id>/<image-name>:<tag>
-          # The CI/CD pipeline overwrites this tag with the Git SHA on each deploy.
-          image: gcr.io/project-efaf083d-e292-4f24-a27/calculator:latest
+          # Format: REGION-docker.pkg.dev/PROJECT_ID/REPO_ID/IMAGE:TAG
+          # This placeholder is overwritten by the CI/CD pipeline on every push:
+          #   kubectl set image deployment/calculator calculator=<AR_REGISTRY>/calculator:sha-<abc>
+          # Get the correct base URL from Terraform:
+          #   terraform output -raw cicd_registry_url
+          image: us-central1-docker.pkg.dev/your-project-id/calculator-repo/calculator:latest
 
           # Always pull from the registry (don't use a locally cached image).
           # Important when using mutable tags like "latest".

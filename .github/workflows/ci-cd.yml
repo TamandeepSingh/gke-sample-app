@@ -3,30 +3,38 @@
 # ============================================================
 # Pipeline stages:
 #   1. test   — run unit tests (fast feedback, no Docker needed)
-#   2. build  — build Docker image and push to GCP Container Registry (GCR)
+#   2. build  — build Docker image and push to Artifact Registry
 #   3. deploy — update the Kubernetes Deployment on GKE
 #
 # Required GitHub Secrets (Settings → Secrets and variables → Actions):
-#   GCP_PROJECT_ID       — your GCP project ID (e.g. my-project-123)
-#   WIF_PROVIDER         — full Workload Identity Provider resource name
-#                          e.g. projects/123456/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+#   GCP_PROJECT_ID       — GCP project ID  (e.g. my-project-123)
+#   WIF_PROVIDER         — Workload Identity Provider resource name
+#                          Get from: terraform output -raw cicd_wif_provider
+#                          e.g. projects/123/locations/global/workloadIdentityPools/github-pool/providers/github-provider
 #   WIF_SERVICE_ACCOUNT  — SA email to impersonate
-#                          e.g. github-actions-sa@my-project-123.iam.gserviceaccount.com
-#   GKE_CLUSTER_NAME     — GKE cluster name  (e.g. dev-gke-cluster)
-#   GKE_CLUSTER_ZONE     — GKE cluster region (e.g. us-central1)
+#                          Get from: terraform output -raw cicd_wif_service_account
+#                          e.g. github-actions-cicd@my-project-123.iam.gserviceaccount.com
+#   AR_REGISTRY          — Artifact Registry base URL (no trailing slash)
+#                          Get from: terraform output -raw cicd_registry_url
+#                          e.g. us-central1-docker.pkg.dev/my-project-123/calculator-repo
+#   GKE_CLUSTER_NAME     — GKE cluster name   (e.g. dev-gke-cluster)
+#   GKE_CLUSTER_ZONE     — GKE cluster region  (e.g. us-central1)
 #
 # No SA key required — Workload Identity Federation (WIF) is used instead.
 #
 # How WIF authentication works:
 #   1. GitHub generates a short-lived OIDC token signed by GitHub's token issuer.
-#   2. google-github-actions/auth sends that token to GCP's STS (Security Token Service).
-#   3. GCP verifies the token against the WIF Provider config (issuer + attribute conditions).
-#   4. GCP returns a short-lived access token scoped to the impersonated service account.
-#   5. The token expires when the job ends — nothing persists, nothing to leak.
+#   2. google-github-actions/auth sends it to GCP's STS (Security Token Service).
+#   3. GCP verifies the token against the WIF Provider (issuer + attribute_condition).
+#   4. GCP returns a short-lived SA access token — expires when the job ends.
+#   Nothing is stored. Nothing to rotate. Nothing to leak.
 #
-# How GCR authentication works after WIF:
-#   `gcloud auth configure-docker` registers gcloud as a Docker credential helper.
-#   Docker calls gcloud to get a fresh GCP token before each push to gcr.io.
+# How Artifact Registry authentication works:
+#   `gcloud auth configure-docker HOSTNAME` registers gcloud as a Docker
+#   credential helper for that specific AR hostname (e.g. us-central1-docker.pkg.dev).
+#   Docker then calls gcloud to get a fresh token before each push.
+#   Unlike GCR, you must pass the hostname explicitly — `configure-docker` without
+#   arguments only configures gcr.io hostnames, not Artifact Registry.
 # ============================================================
 
 name: CI/CD Pipeline
@@ -40,15 +48,18 @@ on:
       - main          # test only — no build or deploy on PRs
 
 env:
-  # GCR image path: gcr.io/<project-id>/<image-name>
-  # ${{ secrets.GCP_PROJECT_ID }} is substituted at runtime from GitHub Secrets.
-  IMAGE: gcr.io/${{ secrets.GCP_PROJECT_ID }}/calculator
+  # Full image path for this app.
+  # AR_REGISTRY comes from: terraform output -raw cicd_registry_url
+  # Format: REGION-docker.pkg.dev/PROJECT_ID/REPO_ID/IMAGE_NAME
+  # Example: us-central1-docker.pkg.dev/my-project/calculator-repo/calculator
+  IMAGE: ${{ secrets.AR_REGISTRY }}/calculator
 
 jobs:
 
   # =============================================================
   # Job 1: Test
   # =============================================================
+  # Runs on every push and PR. Fails fast before any image is built.
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -66,44 +77,46 @@ jobs:
       - name: Install dependencies
         run: pip install -r app/requirements.txt pytest
 
+      # pytest discovers test files matching test_*.py
+      # -v prints each test name — easier to spot which test failed
       - name: Run tests
         run: pytest tests/ -v
 
   # =============================================================
-  # Job 2: Build & Push to GCR
+  # Job 2: Build & Push to Artifact Registry
   # =============================================================
+  # Skipped on pull requests — only runs on merged commits to main.
   build:
-    name: Build & Push to GCR
+    name: Build & Push to Artifact Registry
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'push'
 
     outputs:
-      # Pass the exact image tag to the deploy job so both jobs
-      # use the same SHA — avoids a race condition if "latest" moves.
+      # Pass the exact SHA tag to the deploy job.
+      # Both jobs use this same tag — prevents a race where "latest"
+      # could be updated by another concurrent push.
       image-tag: ${{ steps.tag.outputs.tag }}
 
-    # id-token: write is REQUIRED for Workload Identity Federation.
-    # It allows the job to request a GitHub OIDC token, which is then
-    # exchanged for a short-lived GCP access token by google-github-actions/auth.
     permissions:
       contents: read
-      id-token: write
+      id-token: write   # REQUIRED for WIF — allows requesting a GitHub OIDC token
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       # -----------------------------------------------------------
-      # Compute image tag
+      # Compute image tag from the Git SHA
       # -----------------------------------------------------------
-      # Tag images with the short Git SHA (first 7 chars of the commit hash).
+      # Short SHA (7 chars) is unique enough for versioning.
+      # Prefixed with "sha-" to make it a valid Docker tag.
       # Example: sha-a1b2c3d
-      # Why SHA instead of "latest"?
-      #   - Every image is traceable to an exact commit.
-      #   - You can roll back to any previous version by its SHA.
-      #   - "latest" is mutable — it changes with every push, making
-      #     rollbacks unreliable.
+      #
+      # Why not use "latest" as the deploy tag?
+      #   - "latest" is mutable — another push can overwrite it mid-deploy.
+      #   - SHA tags are immutable — what you built is what gets deployed.
+      #   - Rollback = point kubectl at a previous SHA tag.
       - name: Compute image tag
         id: tag
         run: echo "tag=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
@@ -113,8 +126,9 @@ jobs:
       # -----------------------------------------------------------
       # No SA key needed. GitHub's OIDC token is exchanged for a
       # short-lived GCP access token scoped to WIF_SERVICE_ACCOUNT.
-      # token_format: access_token makes the token available for
-      # tools like gcloud and Docker that need an OAuth2 access token.
+      # token_format: access_token is required so gcloud and Docker
+      # can use the resulting credential (they need an OAuth2 token,
+      # not just the Application Default Credentials file).
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -123,30 +137,45 @@ jobs:
           token_format: access_token
 
       # -----------------------------------------------------------
-      # Configure Docker to authenticate with GCR
+      # Configure Docker to authenticate with Artifact Registry
       # -----------------------------------------------------------
-      # `gcloud auth configure-docker` edits ~/.docker/config.json
-      # to use gcloud as a credential helper for gcr.io domains.
-      # After this, every `docker push gcr.io/...` automatically
-      # includes a valid GCP auth token — no explicit `docker login` needed.
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker --quiet
-        # --quiet suppresses the "do you want to continue?" prompt
+      # Artifact Registry uses region-specific hostnames:
+      #   us-central1-docker.pkg.dev, eu-docker.pkg.dev, etc.
+      #
+      # `gcloud auth configure-docker HOSTNAME` registers gcloud as
+      # a credential helper for that hostname in ~/.docker/config.json.
+      # Every subsequent `docker push` to that hostname automatically
+      # calls gcloud to get a fresh token.
+      #
+      # Key difference from GCR:
+      #   GCR:  gcloud auth configure-docker        (covers *.gcr.io)
+      #   AR:   gcloud auth configure-docker HOSTNAME (must be explicit)
+      #
+      # We extract the hostname from AR_REGISTRY (the first path segment)
+      # so this step works regardless of which region AR is in.
+      - name: Configure Docker for Artifact Registry
+        run: |
+          AR_HOSTNAME=$(echo "${{ secrets.AR_REGISTRY }}" | cut -d'/' -f1)
+          gcloud auth configure-docker "$AR_HOSTNAME" --quiet
 
       # -----------------------------------------------------------
       # Set up Docker Buildx
       # -----------------------------------------------------------
-      # Buildx enables build caching (cache-from/cache-to below),
-      # which reuses unchanged layers between runs for faster builds.
+      # Buildx supports build caching via cache-from/cache-to below.
+      # Unchanged layers (e.g. pip install) are reused from the cache
+      # on subsequent runs — significantly faster rebuilds.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       # -----------------------------------------------------------
-      # Build and push image to GCR
+      # Build and push image to Artifact Registry
       # -----------------------------------------------------------
-      # Two tags are pushed:
-      #   1. SHA tag  — immutable, used by the deploy job
-      #   2. latest   — convenient for manual pulls, but don't rely on it for deploys
+      # Pushes two tags on every build:
+      #   SHA tag  (sha-a1b2c3d) — immutable, used by the deploy job
+      #   latest               — convenience tag for manual docker pull
+      #
+      # The deploy job uses the SHA tag, not "latest", to guarantee
+      # it deploys exactly what this build job produced.
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -156,30 +185,32 @@ jobs:
             ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
             ${{ env.IMAGE }}:latest
           cache-from: type=gha          # pull cached layers from GitHub Actions cache
-          cache-to: type=gha,mode=max   # store new layers in GitHub Actions cache
+          cache-to: type=gha,mode=max   # push new layers to GitHub Actions cache
 
   # =============================================================
   # Job 3: Deploy to GKE
   # =============================================================
+  # Runs after a successful build. Each job runs on a fresh VM,
+  # so GCP auth must be set up again independently.
   deploy:
     name: Deploy to GKE
     runs-on: ubuntu-latest
     needs: build
-    environment: production   # shows up in GitHub's Deployments tab
+    environment: production   # creates a deployment record in GitHub's Deployments tab
 
     permissions:
       contents: read
-      id-token: write   # required for WIF — allows requesting a GitHub OIDC token
+      id-token: write   # required for WIF
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       # -----------------------------------------------------------
-      # Authenticate to GCP (again — each job runs on a fresh VM)
+      # Authenticate to GCP (fresh job — no shared state from build)
       # -----------------------------------------------------------
-      # Jobs don't share filesystem state — credentials from the build
-      # job are gone. Every job that needs GCP access must auth independently.
+      # The deploy job only needs to call GKE APIs, not push to AR,
+      # so token_format: access_token is not required here.
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -189,8 +220,8 @@ jobs:
       # -----------------------------------------------------------
       # Get GKE credentials
       # -----------------------------------------------------------
-      # Fetches a short-lived kubeconfig from GKE and writes it to disk.
-      # All subsequent kubectl commands use this config to talk to the cluster.
+      # Fetches a short-lived kubeconfig and writes it to disk.
+      # All kubectl commands after this step talk to your GKE cluster.
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
@@ -201,27 +232,29 @@ jobs:
       # -----------------------------------------------------------
       # Apply Kubernetes manifests
       # -----------------------------------------------------------
-      # kubectl apply is idempotent — safe to run on every deployment.
-      # It creates resources that don't exist and patches ones that do.
-      # This keeps the Service and Deployment spec in sync with the files in k8s/.
+      # kubectl apply is idempotent — creates missing resources and
+      # patches existing ones. Safe to run on every deployment.
+      # Keeps the cluster in sync with the manifests in k8s/.
       - name: Apply Kubernetes manifests
         run: kubectl apply -f k8s/
 
       # -----------------------------------------------------------
       # Roll out the new image
       # -----------------------------------------------------------
-      # Uses the SHA tag from the build job output — guaranteed to be
-      # the exact image we just built, not whatever "latest" points to.
+      # Uses the SHA tag passed from the build job output.
+      # This is the exact image built in this pipeline run — not
+      # whatever "latest" happens to point to at deploy time.
       - name: Update deployment image
         run: |
           kubectl set image deployment/calculator \
             calculator=${{ env.IMAGE }}:${{ needs.build.outputs.image-tag }}
 
       # -----------------------------------------------------------
-      # Wait for rollout
+      # Wait for rollout to complete
       # -----------------------------------------------------------
-      # Blocks until all Pods are healthy or the timeout expires.
-      # If it times out (e.g. readiness probe failing), the job fails
-      # and you can run: kubectl rollout undo deployment/calculator
+      # Blocks the job until all Pods pass their readiness probe.
+      # If a Pod fails (bad image, crashing app, probe timeout),
+      # this step fails and you can roll back with:
+      #   kubectl rollout undo deployment/calculator
       - name: Wait for rollout
         run: kubectl rollout status deployment/calculator --timeout=120s

@@ -2,10 +2,12 @@
 <!--
   index.html — Calculator UI
   Jinja2 templating is used here (Flask's default template engine).
-  Syntax:
-    {{ variable }}       — outputs a variable's value
-    {% if condition %}   — conditional block
-    {% for x in list %}  — loop block
+  Syntax (NOTE: do not write raw Jinja2 block tags in HTML comments —
+  Jinja2 parses the whole file before HTML, so block tags inside
+  comments are executed and must be closed):
+    double-brace   variable         — outputs a variable's value
+    percent-brace  if condition     — conditional block (close with endif)
+    percent-brace  for x in list   — loop block (close with endfor)
   Flask renders this file server-side and sends plain HTML to the browser.
 -->
 <html lang="en">
