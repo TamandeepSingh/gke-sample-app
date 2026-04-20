@@ -1,0 +1,63 @@
+# ============================================================
+# k8s/service.yaml — Kubernetes Service
+# ============================================================
+# Pods are ephemeral — they get new IP addresses when restarted.
+# A Service provides a stable DNS name and IP that always routes
+# to healthy Pods, even as Pods come and go.
+#
+# How traffic flows (with the Terraform GCP load balancer):
+#
+#   Internet
+#     │
+#     ▼
+#   GCP Global HTTP Load Balancer  (created by Terraform)
+#     │  routes to NodePort 30080 on every GKE node
+#     ▼
+#   Kubernetes Service (NodePort 30080)
+#     │  kube-proxy forwards to one of the healthy Pod IPs
+#     ▼
+#   Calculator Pod (port 8080)
+#
+# Apply:  kubectl apply -f k8s/service.yaml
+# Check:  kubectl get service calculator
+# ============================================================
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: calculator
+
+spec:
+  # ---------------------------------------------------------------
+  # Selector
+  # ---------------------------------------------------------------
+  # The Service sends traffic only to Pods that have this label.
+  # Matches the labels in deployment.yaml → spec.template.metadata.labels.
+  selector:
+    app: calculator
+
+  # ---------------------------------------------------------------
+  # Service type: NodePort
+  # ---------------------------------------------------------------
+  # NodePort opens a static port (nodePort) on EVERY node in the cluster.
+  # External traffic hits any node's IP on that port, and kube-proxy
+  # forwards it to one of the matching Pods.
+  #
+  # Why NodePort instead of LoadBalancer?
+  # The Terraform setup in Terraform-learning/ already creates a GCP
+  # Global HTTP Load Balancer that targets this NodePort.
+  # Using NodePort avoids provisioning a second (per-service) GCP LB.
+  #
+  # Other types for reference:
+  #   ClusterIP   — internal only, no external access (default)
+  #   LoadBalancer — GCP provisions a dedicated external LB per Service (costs $)
+  #   ExternalName — maps to an external DNS name (advanced use)
+  type: NodePort
+
+  ports:
+    - name: http
+      port: 80           # Port the Service listens on inside the cluster
+      targetPort: 8080   # Port the container (gunicorn) listens on
+      nodePort: 30080    # Port opened on every node (must be 30000–32767)
+                         # Must match var.node_port in your Terraform config

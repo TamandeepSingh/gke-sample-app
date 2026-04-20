@@ -1,0 +1,128 @@
+# ============================================================
+# k8s/deployment.yaml — Kubernetes Deployment
+# ============================================================
+# A Deployment is a Kubernetes resource that manages a set of
+# identical Pods (running containers). It handles:
+#   - Ensuring the desired number of replicas are always running.
+#   - Rolling updates: gradually replacing old Pods with new ones
+#     so there is zero downtime during a new release.
+#   - Automatic rollback if the new version fails health checks.
+#
+# Apply:    kubectl apply -f k8s/deployment.yaml
+# Status:   kubectl rollout status deployment/calculator
+# Rollback: kubectl rollout undo deployment/calculator
+# ============================================================
+
+apiVersion: apps/v1    # Deployment lives in the apps/v1 API group
+kind: Deployment
+
+metadata:
+  name: calculator         # Unique name for this Deployment in the namespace
+  labels:
+    app: calculator        # Labels are key/value pairs used for filtering/grouping
+
+spec:
+  # ---------------------------------------------------------------
+  # Replica count
+  # ---------------------------------------------------------------
+  # Kubernetes keeps exactly this many Pods running at all times.
+  # If a Pod crashes, the Deployment controller creates a new one.
+  # 2 replicas means we survive one Pod going down.
+  replicas: 2
+
+  # ---------------------------------------------------------------
+  # Selector
+  # ---------------------------------------------------------------
+  # The Deployment uses this label selector to identify which Pods
+  # it owns. Must match the labels in the Pod template below.
+  selector:
+    matchLabels:
+      app: calculator
+
+  # ---------------------------------------------------------------
+  # Rolling update strategy
+  # ---------------------------------------------------------------
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge: how many extra Pods can exist above `replicas`
+      # during an update. "1" means up to 3 Pods temporarily.
+      maxSurge: 1
+      # maxUnavailable: how many Pods can be down during an update.
+      # "0" means always keep `replicas` healthy Pods running.
+      maxUnavailable: 0
+
+  # ---------------------------------------------------------------
+  # Pod template
+  # ---------------------------------------------------------------
+  # Everything under `template` describes the Pod that gets created.
+  # Kubernetes stamps out `replicas` copies of this template.
+  template:
+    metadata:
+      labels:
+        app: calculator    # Must match selector.matchLabels above
+
+    spec:
+      containers:
+        - name: calculator
+
+          # -------------------------------------------------------
+          # Image
+          # -------------------------------------------------------
+          # Format: registry/repository:tag
+          # ghcr.io is GitHub Container Registry — free for public repos.
+          # The CI/CD pipeline replaces this tag with the Git SHA on each push,
+          # ensuring every deployment is traceable to an exact commit.
+          # REPLACE "your-gcp-project-id" with your actual GCP project ID.
+          # Format: gcr.io/<project-id>/<image-name>:<tag>
+          # The CI/CD pipeline overwrites this tag with the Git SHA on each deploy.
+          image: gcr.io/your-gcp-project-id/calculator:latest
+
+          # Always pull from the registry (don't use a locally cached image).
+          # Important when using mutable tags like "latest".
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8080   # Must match the port gunicorn binds to
+
+          # -------------------------------------------------------
+          # Resource requests and limits
+          # -------------------------------------------------------
+          # requests: the minimum resources Kubernetes reserves for this Pod.
+          #   Used by the scheduler to decide which node to place the Pod on.
+          # limits: the maximum the container is allowed to use.
+          #   Prevents one misbehaving Pod from starving others.
+          resources:
+            requests:
+              cpu: "100m"       # 100 millicores = 0.1 vCPU
+              memory: "128Mi"   # 128 mebibytes
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+
+          # -------------------------------------------------------
+          # Liveness probe
+          # -------------------------------------------------------
+          # Kubernetes calls this periodically. If it fails, the Pod
+          # is considered dead and is restarted automatically.
+          # Uses the /healthz route we defined in app.py.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10   # wait 10 s before first probe (app startup time)
+            periodSeconds: 15         # probe every 15 s
+
+          # -------------------------------------------------------
+          # Readiness probe
+          # -------------------------------------------------------
+          # Kubernetes calls this before routing traffic to a Pod.
+          # If it fails, the Pod is removed from the Service's endpoints
+          # (no traffic sent) but NOT restarted. Used during rolling updates
+          # to ensure the new version is healthy before the old one is removed.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10

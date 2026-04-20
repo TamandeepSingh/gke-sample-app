@@ -1,0 +1,102 @@
+# ============================================================
+# gke-sample-app .gitignore
+# ============================================================
+
+# ---------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------
+
+# Bytecode compiled by the interpreter — machine-specific, fully
+# reproducible from .py source files. Never commit.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extension modules
+*.so
+
+# ---------------------------------------------------------------
+# Virtual environments
+# ---------------------------------------------------------------
+# Local dependency sandboxes — each developer creates their own.
+# The canonical dependency list lives in requirements.txt.
+.venv/
+venv/
+env/
+ENV/
+.env/
+
+# ---------------------------------------------------------------
+# Environment variable files
+# ---------------------------------------------------------------
+# .env files hold local secrets (API keys, DB passwords, etc.).
+# This project uses Workload Identity Federation for GCP auth,
+# so no credentials belong in .env files — but ignore them anyway
+# as a safety net.
+.env
+.env.*
+!.env.example    # allow a committed example template (no real values)
+
+# ---------------------------------------------------------------
+# Testing and coverage
+# ---------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# ---------------------------------------------------------------
+# Distribution / packaging
+# ---------------------------------------------------------------
+# Not relevant for a web app, but included as a safety net in case
+# someone runs `pip install -e .` or `python setup.py build`.
+dist/
+build/
+*.egg-info/
+*.egg
+
+# ---------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------
+# Nothing Docker-specific needs ignoring, but exclude any locally
+# built test images accidentally written as files.
+*.tar
+
+# ---------------------------------------------------------------
+# Kubernetes
+# ---------------------------------------------------------------
+# Local kubeconfig files if anyone writes them into the repo directory.
+# The real kubeconfig lives at ~/.kube/config (managed by gcloud).
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# ---------------------------------------------------------------
+# GCP credentials (belt-and-suspenders safety net)
+# ---------------------------------------------------------------
+# Workload Identity Federation means no key files are needed,
+# but catch them here in case someone accidentally creates one.
+key.json
+*-key.json
+service-account*.json
+credentials.json
+gcp-key*.json
+
+# ---------------------------------------------------------------
+# IDE and editor
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------
+# OS
+# ---------------------------------------------------------------
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db

@@ -1,0 +1,15 @@
+# .dockerignore — files excluded from the Docker build context
+#
+# When you run `docker build`, Docker sends all files in the directory
+# to the Docker daemon (the "build context"). Large or unnecessary files
+# slow down the build and increase image size.
+# .dockerignore works like .gitignore — patterns here are excluded.
+
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/*.pyo
+tests/
+*.md
+.dockerignore

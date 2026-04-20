@@ -1,0 +1,14 @@
+# requirements.txt — Python dependencies
+#
+# pip installs these inside the Docker image during the build step.
+# Pin exact versions so builds are reproducible across environments.
+# "works on my machine" bugs disappear when everyone uses the same versions.
+
+# Flask — the web framework that handles HTTP routing and templating.
+flask==3.1.1
+
+# gunicorn — production-grade WSGI server.
+# Flask's built-in server (app.run) is single-threaded and not suitable
+# for production. gunicorn spawns multiple worker processes to handle
+# concurrent requests efficiently.
+gunicorn==23.0.0

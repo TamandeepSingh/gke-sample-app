@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<!--
+  index.html — Calculator UI
+  Jinja2 templating is used here (Flask's default template engine).
+  Syntax:
+    {{ variable }}       — outputs a variable's value
+    {% if condition %}   — conditional block
+    {% for x in list %}  — loop block
+  Flask renders this file server-side and sends plain HTML to the browser.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GKE Calculator</title>
+  <style>
+    /* Simple inline CSS — no external files needed for this demo. */
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f0f4f8;
+    }
+    .card {
+      background: white;
+      padding: 2rem 2.5rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      width: 360px;
+    }
+    h1 { margin-top: 0; color: #2d3748; font-size: 1.5rem; }
+    label { display: block; margin: 0.8rem 0 0.3rem; color: #4a5568; font-size: 0.9rem; }
+    input, select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 1.2rem;
+      width: 100%;
+      padding: 0.65rem;
+      background: #4299e1;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover { background: #3182ce; }
+
+    /* Result box — shown only when a calculation was performed */
+    .result {
+      margin-top: 1.2rem;
+      padding: 0.75rem 1rem;
+      background: #ebf8ff;
+      border-left: 4px solid #4299e1;
+      border-radius: 4px;
+      color: #2b6cb0;
+      font-size: 1.1rem;
+    }
+
+    /* Error box — shown when validation fails */
+    .error {
+      margin-top: 1.2rem;
+      padding: 0.75rem 1rem;
+      background: #fff5f5;
+      border-left: 4px solid #fc8181;
+      border-radius: 4px;
+      color: #c53030;
+    }
+
+    .footer {
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: #a0aec0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Calculator</h1>
+    <p style="color:#718096;font-size:0.85rem;margin-top:-0.5rem;">
+      Running on Kubernetes · GKE
+    </p>
+
+    <!--
+      action="/calculate" — POST form data to the /calculate route in app.py.
+      method="post"       — sends data in the request body, not the URL.
+    -->
+    <form action="/calculate" method="post">
+
+      <label for="a">First number</label>
+      <!-- value="{{ request.form.get('a', '') }}" would preserve input after submit,
+           but we keep it simple here for clarity. -->
+      <input type="number" id="a" name="a" step="any" placeholder="e.g. 10" required />
+
+      <label for="op">Operation</label>
+      <select id="op" name="op">
+        <option value="add">Add  (+)</option>
+        <option value="subtract">Subtract  (−)</option>
+        <option value="multiply">Multiply  (×)</option>
+        <option value="divide">Divide  (÷)</option>
+      </select>
+
+      <label for="b">Second number</label>
+      <input type="number" id="b" name="b" step="any" placeholder="e.g. 5" required />
+
+      <button type="submit">Calculate</button>
+    </form>
+
+    <!--
+      Jinja2 conditional — only renders the block if `result` is not None.
+      Flask passes result=None on a plain GET, so nothing shows initially.
+    -->
+    {% if result is not none %}
+    <div class="result">
+      {{ expression }}
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="error">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="footer">gke-sample-app · GitHub Actions CI/CD</div>
+  </div>
+</body>
+</html>
