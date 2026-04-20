@@ -76,7 +76,7 @@ spec:
           # REPLACE "your-gcp-project-id" with your actual GCP project ID.
           # Format: gcr.io/<project-id>/<image-name>:<tag>
           # The CI/CD pipeline overwrites this tag with the Git SHA on each deploy.
-          image: gcr.io/your-gcp-project-id/calculator:latest
+          image: gcr.io/project-efaf083d-e292-4f24-a27/calculator:latest
 
           # Always pull from the registry (don't use a locally cached image).
           # Important when using mutable tags like "latest".
